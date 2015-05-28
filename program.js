@@ -1,42 +1,23 @@
 'use strict';
 
-//creates a pipeline from a list of streams. The first is exposed as writable,
-//and the last is exposed as readable.
-var combine = require('stream-combiner');
-var split = require('split');
-var through2 = require('through2');
-var gzip = require('zlib').createGzip();
+var unzip = require('zlib').createGunzip();
+var crypto = require('crypto');
+var decipher = crypto.createDecipher(process.argv[2], process.argv[3]);
+var through = require('through');
+var parser = require('tar').Parse();
 
-module.exports = function() {
-  var currentGenre;
+//For each file within the tar
+parser.on('entry', function(entry) 
+{
+  if(entry.type !== 'File') {
+    return;
+  }
+  //Create a hash and pipe it to the print function
+  entry.pipe(crypto.createHash('md5', {encoding: 'hex'}))
+       .pipe(through(function(chunk, enc, done) {
+          this.queue(chunk.toString() + ' ' + entry.path + '\n');
+        }))
+       .pipe(process.stdout);
+});
 
-  //read newline-separated json
-  //(each chunk will become a separate js object)
-  //split(JSON.parse, null, {trailing: false}),
-  //var split = Split('\n');
-
-  //group books into genres,
-  var group = through2(function(chunk, enc, done) {
-      if(chunk.length === 0)
-        return done();
-
-      chunk = JSON.parse(chunk);
-      if (chunk.type === 'genre') {
-        if (currentGenre) {
-          this.push(JSON.stringify(currentGenre) + '\n');
-        }
-        currentGenre = {name: chunk.name, books: []};
-        done();
-      } else {
-        currentGenre.books.push(chunk.name);
-        done();
-      }
-    },function(done) {
-      if (currentGenre) {
-        this.push(JSON.stringify(currentGenre) + '\n');
-      }
-      done();
-    });
-
-  return combine(split('\n'), group, gzip);
-};
+process.stdin.pipe(decipher).pipe(unzip).pipe(parser);
